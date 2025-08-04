@@ -1578,6 +1578,9 @@ const AddPatientForm = ({ onClose, onPatientUpdated }: { onClose: () => void; on
   // State variables for patient registration form
   const [gestationalAge, setGestationalAge] = useState("");
   const [lmpDate, setLmpDate] = useState("");
+  const [isPostpartum, setIsPostpartum] = useState(false);
+  const [deliveryDate, setDeliveryDate] = useState("");
+  const [deliveryType, setDeliveryType] = useState("vaginal");
   const [age, setAge] = useState("");
   const [race, setRace] = useState("");
   const [height, setHeight] = useState("");
@@ -1724,27 +1727,36 @@ const AddPatientForm = ({ onClose, onPatientUpdated }: { onClose: () => void; on
         frequency: Object.values(med.frequency).every(v => v) ? "daily" : "specific"
       }));
 
+      const payload: any = {
+        name: name,
+        risk_category: riskCategory,
+        medications: formattedMedications,
+        phone: phone,
+        description: description,
+        race: race,
+        age: age,
+        height: height,
+        weight: weight,
+        bmi: bmi,
+        risk_factors: riskFactors,
+        additional_notes: additionalNotes,
+        structured_medications: structuredMedications,
+      };
+
+      if (isPostpartum) {
+        payload.delivery_date = deliveryDate;
+        payload.delivery_type = deliveryType;
+        payload.is_postpartum = true;
+      } else {
+        payload.lmp_date = lmpDate;
+      }
+
       const response = await fetch('http://localhost:8000/patients/', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          name: name,
-          lmp_date: lmpDate,
-          risk_category: riskCategory,
-          medications: formattedMedications,
-          phone: phone,
-          description: description,
-          race: race,
-          age: age,
-          height: height,
-          weight: weight,
-          bmi: bmi,
-          risk_factors: riskFactors,
-          additional_notes: additionalNotes,
-          structured_medications: structuredMedications
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
@@ -1787,6 +1799,12 @@ const AddPatientForm = ({ onClose, onPatientUpdated }: { onClose: () => void; on
             />
       </div>
 
+          {/* Patient Type */}
+          <div className="flex items-center space-x-2">
+            <Checkbox id="isPostpartum" checked={isPostpartum} onCheckedChange={(checked) => setIsPostpartum(!!checked)} />
+            <Label htmlFor="isPostpartum">Postnatal Care Patient</Label>
+          </div>
+
           {/* Patient Registration Information */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
@@ -1799,18 +1817,48 @@ const AddPatientForm = ({ onClose, onPatientUpdated }: { onClose: () => void; on
                 required
               />
             </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="lmpDate">LMP (Last Menstrual Period) Date</Label>
-              <Input
-                id="lmpDate"
-                type="date"
-                placeholder="Select LMP date"
-                value={lmpDate}
-                onChange={(e) => setLmpDate(e.target.value)}
-                required
-              />
-            </div>
+
+            {!isPostpartum && (
+              <div className="space-y-2">
+                <Label htmlFor="lmpDate">LMP (Last Menstrual Period) Date</Label>
+                <Input
+                  id="lmpDate"
+                  type="date"
+                  placeholder="Select LMP date"
+                  value={lmpDate}
+                  onChange={(e) => setLmpDate(e.target.value)}
+                  required={!isPostpartum}
+                />
+              </div>
+            )}
+
+            {isPostpartum && (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="deliveryDate">Delivery Date</Label>
+                  <Input
+                    id="deliveryDate"
+                    type="date"
+                    value={deliveryDate}
+                    onChange={(e) => setDeliveryDate(e.target.value)}
+                    required={isPostpartum}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="deliveryType">Delivery Type</Label>
+                  <Select value={deliveryType} onValueChange={setDeliveryType}>
+                    <SelectTrigger className="mt-1">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="vaginal">Vaginal</SelectItem>
+                      <SelectItem value="c-section">C-Section</SelectItem>
+                      <SelectItem value="assisted">Assisted</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </>
+            )}
             
             <div className="space-y-2">
               <Label htmlFor="age">Age</Label>

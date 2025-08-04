@@ -151,7 +151,21 @@ def list_patients():
         "bmi": p.bmi,
         "risk_factors": p.risk_factors,
         "additional_notes": p.additional_notes,
-        "risk_category": p.risk_category
+        "risk_category": p.risk_category,
+        # Postnatal care fields
+        "delivery_date": p.delivery_date.isoformat() if p.delivery_date else None,
+        "delivery_type": p.delivery_type,
+        "is_postpartum": p.is_postpartum,
+        "postpartum_week": p.postpartum_week,
+        # Patient metrics
+        "total_calls_scheduled": p.total_calls_scheduled,
+        "total_calls_completed": p.total_calls_completed,
+        "total_calls_failed": p.total_calls_failed,
+        "total_calls_missed": p.total_calls_missed,
+        "call_success_rate": p.call_success_rate,
+        "average_call_duration": p.average_call_duration,
+        "last_call_date": p.last_call_date.isoformat() if p.last_call_date else None,
+        "last_call_status": p.last_call_status,
     } for p in patients]
 
 @app.post("/patients/")
@@ -166,6 +180,10 @@ def create_patient(
         risk_category = patient.get("risk_category", "low")
         medications = patient.get("medications", "")
         phone = patient.get("phone", "")
+        # Postnatal care data
+        delivery_date_str = patient.get("delivery_date")
+        delivery_type = patient.get("delivery_type", "vaginal")
+        is_postpartum = patient.get("is_postpartum", False)
         
         # Parse LMP date and calculate gestational age
         lmp_date = None
@@ -197,42 +215,70 @@ def create_patient(
                         "frequency": "daily"
                     })
         
-        # Use fine-tuned MedGemma to generate proper IVR schedule
         current_date = datetime.now()
-        try:
-            ivr_result = fine_tuned_medgemma_ai.generate_comprehensive_ivr_schedule(
-                gestational_age_weeks=gestational_age,
-                patient_name=patient_name,
-                current_date=current_date,
-                risk_factors=patient.get("risk_factors", []),
-                risk_category=risk_category,
-                structured_medications=structured_medications
-            )
-        except Exception as e:
-            print(f"Warning: IVR schedule generation failed: {e}")
-            ivr_result = None
-        
-        # Extract the schedule from the result
-        if isinstance(ivr_result, dict) and ivr_result.get("success"):
-            ivr_schedule = ivr_result.get("schedule", [])
-            call_schedule = ensure_call_schedule_format(ivr_schedule)
+
+        # Handle postnatal care patients
+        delivery_date = None
+        postpartum_week = 0
+        if delivery_date_str:
+            try:
+                delivery_date = datetime.fromisoformat(delivery_date_str.replace('Z', '+00:00'))
+                is_postpartum = True
+                postpartum_week = max(0, (current_date - delivery_date).days // 7)
+            except ValueError:
+                delivery_date = None
+
+        call_schedule = None
+        if is_postpartum and delivery_date:
+            try:
+                postnatal_result = medgemma_ai.generate_postnatal_care_schedule(
+                    patient_name=patient_name,
+                    delivery_date=delivery_date,
+                    current_date=current_date,
+                    delivery_type=delivery_type
+                )
+                call_schedule = ensure_call_schedule_format(postnatal_result.get("schedule", []))
+            except Exception as e:
+                print(f"Warning: Postnatal schedule generation failed: {e}")
+                call_schedule = ensure_call_schedule_format([])
         else:
-            # Fallback to basic schedule if MedGemma fails
-            call_schedule = ensure_call_schedule_format([
-                {
-                    "type": "medication_reminder",
-                    "message": f"Hello {patient_name}, this is your medication reminder. Please take your medications as prescribed.",
-                    "time": "09:00 AM"
-                },
-                {
-                    "type": "appointment_reminder", 
-                    "message": f"Hello {patient_name}, this is your appointment reminder. Please attend your scheduled prenatal visit.",
-                    "time": "02:00 PM"
-                }
-            ])
-        
+            # Use fine-tuned MedGemma to generate proper IVR schedule for pregnancy
+            try:
+                ivr_result = fine_tuned_medgemma_ai.generate_comprehensive_ivr_schedule(
+                    gestational_age_weeks=gestational_age,
+                    patient_name=patient_name,
+                    current_date=current_date,
+                    risk_factors=patient.get("risk_factors", []),
+                    risk_category=risk_category,
+                    structured_medications=structured_medications
+                )
+            except Exception as e:
+                print(f"Warning: IVR schedule generation failed: {e}")
+                ivr_result = None
+
+            # Extract the schedule from the result
+            if isinstance(ivr_result, dict) and ivr_result.get("success"):
+                ivr_schedule = ivr_result.get("schedule", [])
+                call_schedule = ensure_call_schedule_format(ivr_schedule)
+            else:
+                # Fallback to basic schedule if MedGemma fails
+                call_schedule = ensure_call_schedule_format([
+                    {
+                        "type": "medication_reminder",
+                        "message": f"Hello {patient_name}, this is your medication reminder. Please take your medications as prescribed.",
+                        "time": "09:00 AM"
+                    },
+                    {
+                        "type": "appointment_reminder",
+                        "message": f"Hello {patient_name}, this is your appointment reminder. Please attend your scheduled prenatal visit.",
+                        "time": "02:00 PM"
+                    }
+                ])
+
         # Create diagnosis string
-        diagnosis = f"Pregnancy - Week {gestational_age}" if gestational_age > 0 else patient.get("diagnosis", "")
+        diagnosis = patient.get("diagnosis", "")
+        if not is_postpartum and gestational_age > 0:
+            diagnosis = f"Pregnancy - Week {gestational_age}"
         
         new_patient = Patient(
             name=patient_name,
@@ -250,7 +296,12 @@ def create_patient(
             risk_factors=", ".join(patient.get("risk_factors", [])) if isinstance(patient.get("risk_factors"), list) else patient.get("risk_factors", ""),
             additional_notes=patient.get("additional_notes", ""),
             risk_category=risk_category,
-            lmp_date=lmp_date
+            lmp_date=lmp_date,
+            delivery_date=delivery_date,
+            delivery_type=delivery_type if is_postpartum else "",
+            is_postpartum=is_postpartum,
+            postpartum_week=postpartum_week,
+            postnatal_care_schedule=call_schedule if is_postpartum else ""
         )
         db.add(new_patient)
         db.commit()
@@ -273,7 +324,11 @@ def create_patient(
             "additional_notes": new_patient.additional_notes,
             "risk_category": new_patient.risk_category,
             "lmp_date": new_patient.lmp_date.isoformat() if new_patient.lmp_date else None,
-            "gestational_age": gestational_age
+            "gestational_age": gestational_age,
+            "delivery_date": new_patient.delivery_date.isoformat() if new_patient.delivery_date else None,
+            "delivery_type": new_patient.delivery_type,
+            "is_postpartum": new_patient.is_postpartum,
+            "postpartum_week": new_patient.postpartum_week
         }
     except SQLAlchemyError as e:
         db.rollback()
@@ -296,7 +351,27 @@ def get_patient(patient_id: int):
         "description": patient.summary,
         "medication_schedule": patient.medication_schedule,
         "call_schedule": patient.call_schedule,
-        "automated_call_category": patient.automated_call_category
+        "automated_call_category": patient.automated_call_category,
+        "race": patient.race,
+        "age": patient.age,
+        "height": patient.height,
+        "weight": patient.weight,
+        "bmi": patient.bmi,
+        "risk_factors": patient.risk_factors,
+        "additional_notes": patient.additional_notes,
+        "risk_category": patient.risk_category,
+        "delivery_date": patient.delivery_date.isoformat() if patient.delivery_date else None,
+        "delivery_type": patient.delivery_type,
+        "is_postpartum": patient.is_postpartum,
+        "postpartum_week": patient.postpartum_week,
+        "total_calls_scheduled": patient.total_calls_scheduled,
+        "total_calls_completed": patient.total_calls_completed,
+        "total_calls_failed": patient.total_calls_failed,
+        "total_calls_missed": patient.total_calls_missed,
+        "call_success_rate": patient.call_success_rate,
+        "average_call_duration": patient.average_call_duration,
+        "last_call_date": patient.last_call_date.isoformat() if patient.last_call_date else None,
+        "last_call_status": patient.last_call_status,
     }
 
 @app.put("/patients/{patient_id}")
@@ -313,6 +388,15 @@ def update_patient(patient_id: int, patient: dict = Body(...)):
         db_patient.medication_schedule = patient.get("medication_schedule", db_patient.medication_schedule)
         db_patient.call_schedule = ensure_call_schedule_format(patient.get("call_schedule", db_patient.call_schedule))
         db_patient.automated_call_category = patient.get("automated_call_category", db_patient.automated_call_category)
+        # Postnatal fields
+        if patient.get("delivery_date"):
+            try:
+                db_patient.delivery_date = datetime.fromisoformat(patient.get("delivery_date").replace('Z', '+00:00'))
+            except ValueError:
+                pass
+        db_patient.delivery_type = patient.get("delivery_type", db_patient.delivery_type)
+        db_patient.is_postpartum = patient.get("is_postpartum", db_patient.is_postpartum)
+        db_patient.postpartum_week = patient.get("postpartum_week", db_patient.postpartum_week)
         db.commit()
         db.refresh(db_patient)
         return {
@@ -323,7 +407,11 @@ def update_patient(patient_id: int, patient: dict = Body(...)):
             "description": db_patient.summary,
             "medication_schedule": db_patient.medication_schedule,
             "call_schedule": db_patient.call_schedule,
-            "automated_call_category": db_patient.automated_call_category
+            "automated_call_category": db_patient.automated_call_category,
+            "delivery_date": db_patient.delivery_date.isoformat() if db_patient.delivery_date else None,
+            "delivery_type": db_patient.delivery_type,
+            "is_postpartum": db_patient.is_postpartum,
+            "postpartum_week": db_patient.postpartum_week
         }
     finally:
         db.close()
@@ -1756,12 +1844,14 @@ def update_delivery_info(patient_id: int, delivery_data: dict = Body(...)):
             patient.delivery_date = delivery_date
             patient.delivery_type = delivery_type
             patient.is_postpartum = True
+            patient.postpartum_week = max(0, (datetime.now() - delivery_date).days // 7)
             # Generate postnatal care schedule
             postnatal_schedule = medgemma_ai.generate_postnatal_care_schedule(
                 patient_name=patient.name,
                 delivery_date=delivery_date,
                 delivery_type=delivery_type
             )
+            patient.postnatal_care_schedule = ensure_call_schedule_format(postnatal_schedule.get("schedule", []))
             # Merge with existing schedule
             try:
                 existing_schedule = patient.call_schedule
