@@ -5,3 +5,11 @@ sqlalchemy
 apscheduler
 pyserial
 python-multipart
+pyttsx3
+torch
+numpy
+requests
+PyYAML
+twilio
+transformers
+datasets
