@@ -8,6 +8,7 @@ import json
 import re
 from typing import Dict, Any, List, Optional
 from rag_service import rag_service
+from googletrans import Translator
 
 # Fix OpenMP issue
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
@@ -33,6 +34,7 @@ class FineTunedMedGemmaAI:
         self.tokenizer = None
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.model_path = "google/gemma-2b"
+        self.translator = Translator()
         logger.info(f"Using device: {self.device}")
         
     def load_model(self):
@@ -109,14 +111,30 @@ class FineTunedMedGemmaAI:
         except Exception as e:
             logger.error(f"❌ Error loading fallback model: {e}")
             return False
+
+    def _simplify_hindi(self, text: str) -> str:
+        """Replace complex Hindi words with simpler alternatives"""
+        replacements = {
+            "गर्भावस्था": "प्रेगनेंसी",
+            "भोजन": "खाना",
+            "आहार": "खाना",
+            "चिकित्सक": "डॉक्टर",
+            "औषधि": "दवा",
+            "नियमित": "रोज",
+            "जल": "पानी",
+            "तुरंत": "फौरन"
+        }
+        for original, simple in replacements.items():
+            text = text.replace(original, simple)
+        return text
     
-    def generate_personalized_ivr_message(self, topic: str, patient_name: str, gestational_age_weeks: int = 28, risk_factors: list = None, risk_category: str = "low", patient_data: dict = None) -> dict:
-        """Generate personalized IVR messages using the enhanced fallback system"""
+    def generate_personalized_ivr_message(self, topic: str, patient_name: str, gestational_age_weeks: int = 28,
+                                          risk_factors: list = None, risk_category: str = "low",
+                                          patient_data: dict = None, language: str = "en") -> dict:
+        """Generate personalized IVR messages with optional Hindi translation"""
         try:
-            # Extract medications from patient_data if available
             medications = patient_data.get("medications", []) if patient_data else []
-            
-            # Use enhanced fallback for consistent high-quality output
+
             message = self._generate_enhanced_fallback_message(
                 topic=topic,
                 patient_name=patient_name,
@@ -125,29 +143,42 @@ class FineTunedMedGemmaAI:
                 medications=medications,
                 risk_category=risk_category
             )
-            
+
+            if language != "en":
+                try:
+                    translated = self.translator.translate(message, dest=language).text
+                    if language == "hi":
+                        translated = self._simplify_hindi(translated)
+                    message = translated
+                except Exception as e:
+                    logger.error(f"Translation error: {e}")
+
             word_count = len(message.split())
-            
+
             return {
                 "message": message,
                 "word_count": word_count,
                 "model_used": "Enhanced Fallback System",
                 "topic": topic,
                 "patient_name": patient_name,
-                "gestational_age_weeks": gestational_age_weeks
+                "gestational_age_weeks": gestational_age_weeks,
+                "language": language
             }
-            
+
         except Exception as e:
             logger.error(f"Error generating personalized IVR message: {e}")
-            # Fallback message
-            fallback_message = f"Hello {patient_name}, this is your health reminder. Please take your medication as prescribed. Press 1 if you'd like to leave a message for our medical team."
+            fallback_message = (
+                f"Hello {patient_name}, this is your health reminder. Please take your medication as prescribed. "
+                "Press 1 if you'd like to leave a message for our medical team."
+            )
             return {
                 "message": fallback_message,
                 "word_count": len(fallback_message.split()),
                 "model_used": "Enhanced Fallback System (Error Recovery)",
                 "topic": topic,
                 "patient_name": patient_name,
-                "gestational_age_weeks": gestational_age_weeks
+                "gestational_age_weeks": gestational_age_weeks,
+                "language": language
             }
     
     def _is_poor_response(self, response: str) -> bool:

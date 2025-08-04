@@ -1009,20 +1009,30 @@ async def generate_ivr_message(request_data: dict):
         gestational_age_weeks = request_data.get("gestational_age_weeks", 0)
         risk_factors = request_data.get("risk_factors", [])
         patient_data = request_data.get("patient_data", {})
-        
-        # Use the enhanced fallback system for reliable quality
-        message = fine_tuned_medgemma_ai.generate_personalized_ivr_message(
-            patient_name, topic, gestational_age_weeks, risk_factors, patient_data=patient_data
+        language = request_data.get("language", "en")
+
+        result = fine_tuned_medgemma_ai.generate_personalized_ivr_message(
+            topic=topic,
+            patient_name=patient_name,
+            gestational_age_weeks=gestational_age_weeks,
+            risk_factors=risk_factors,
+            patient_data=patient_data,
+            language=language
         )
-        
+
+        message_text = result.get("message") if isinstance(result, dict) else str(result)
+        word_count = result.get("word_count", len(message_text.split())) if isinstance(result, dict) else len(message_text.split())
+        model_used = result.get("model_used", "Google Gemma 2B with Enhanced Fallback") if isinstance(result, dict) else "Google Gemma 2B with Enhanced Fallback"
+
         return {
             "success": True,
-            "message": message,
+            "message": message_text,
             "patient_name": patient_name,
             "topic": topic,
             "gestational_age_weeks": gestational_age_weeks,
-            "word_count": len(message.split()),
-            "model_used": "Google Gemma 2B with Enhanced Fallback"
+            "word_count": word_count,
+            "model_used": model_used,
+            "language": language
         }
     except Exception as e:
         return {"success": False, "error": str(e)}
