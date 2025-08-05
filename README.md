@@ -12,6 +12,22 @@
 
 SabCare is an advanced **Interactive Voice Response (IVR) system** designed specifically for maternal healthcare. It leverages **fine-tuned Gemma AI models** to provide personalized pregnancy care support through automated phone calls, intelligent message processing, and comprehensive patient management.
 
+## 🚀 Quick Start
+
+```bash
+# Install backend dependencies
+pip install -r backend/requirements.txt
+
+# Install frontend dependencies
+npm install
+
+# Start development servers
+cd backend && uvicorn main:app --reload &
+npm run dev
+```
+
+For a more detailed guide, including environment configuration and deployment options, see the [Installation & Setup](#-installation--setup) section below.
+
 ## 🌟 Key Innovations
 
 - **🤖 AI-Powered Personalization**: Fine-tuned Gemma 2B model generates context-aware, patient-specific health messages
